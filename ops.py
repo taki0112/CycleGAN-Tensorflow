@@ -2,8 +2,7 @@ import tensorflow as tf
 from tensorflow.contrib.layers import variance_scaling_initializer, batch_norm
 from tensorflow.contrib.framework import arg_scope
 import random
-he_init = variance_scaling_initializer()
-
+initializer = tf.truncated_normal_initializer(stddev=0.02)
 class ImagePool:
   """ History of generated images
       Same logic as https://github.com/junyanz/CycleGAN/blob/master/util/image_pool.lua
@@ -34,9 +33,9 @@ def conv_layer(x, filter_size, kernel, stride=1, padding="VALID",do_norm=True, n
     with tf.variable_scope(layer_name):
         if padding == 1 :
             x = tf.pad(x, [[0,0], [1,1], [1,1], [0,0]])
-            x = tf.layers.conv2d(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=he_init, strides=stride)
+            x = tf.layers.conv2d(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=initializer, strides=stride)
         else :
-            x = tf.layers.conv2d(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=he_init, strides=stride, padding=padding)
+            x = tf.layers.conv2d(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=initializer, strides=stride, padding=padding)
 
         if do_norm:
             if norm == 'instance' :
@@ -57,9 +56,9 @@ def deconv_layer(x, filter_size, kernel, stride=1, padding="VALID",do_norm=True,
     with tf.variable_scope(layer_name):
         if padding == 1 :
             x = tf.pad(x, [[0,0], [1,1], [1,1], [0,0]])
-            x = tf.layers.conv2d_transpose(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=he_init, strides=stride)
+            x = tf.layers.conv2d_transpose(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=initializer, strides=stride)
         else :
-            x = tf.layers.conv2d_transpose(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=he_init, strides=stride, padding=padding)
+            x = tf.layers.conv2d_transpose(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=initializer, strides=stride, padding=padding)
 
         if do_norm:
             if norm == 'instance' :

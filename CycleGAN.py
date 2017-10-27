@@ -131,31 +131,28 @@ class CycleGAN(object):
         """ Loss Function """
         self.G_A_loss = tf.reduce_mean(tf.squared_difference(self.dis_fake_A, 1)) + self.lambda1*(tf.reduce_mean(tf.abs(self.domain_A - self.recon_A)))
         self.G_B_loss = tf.reduce_mean(tf.squared_difference(self.dis_fake_B, 1)) + self.lambda2*(tf.reduce_mean(tf.abs(self.domain_B - self.recon_B)))
+        self.Generator_loss = self.G_A_loss + self.G_B_loss
 
         self.D_A_loss = (tf.reduce_mean(tf.squared_difference(self.dis_real_A, 1)) + tf.reduce_mean(tf.square(self.dis_fake_pool_A))) / 2.0
         self.D_B_loss = (tf.reduce_mean(tf.squared_difference(self.dis_real_B, 1)) + tf.reduce_mean(tf.square(self.dis_fake_pool_B))) / 2.0
 
         """ Training """
         t_vars = tf.trainable_variables()
-        g_A_vars = [var for var in t_vars if 'generator_A' in var.name]
-        g_B_vars = [var for var in t_vars if 'generator_B' in var.name]
+        G_vars = [var for var in t_vars if 'generator' in var.name]
         d_A_vars = [var for var in t_vars if 'discriminator_A' in var.name]
         d_B_vars = [var for var in t_vars if 'discriminator_B' in var.name]
 
         with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
             Adam = tf.train.AdamOptimizer(self.lr, beta1=self.beta1)
 
-            self.g_A_optim = Adam.minimize(self.G_A_loss, var_list=g_A_vars)
-            self.g_B_optim = Adam.minimize(self.G_B_loss, var_list=g_B_vars)
+            self.G_optim = Adam.minimize(self.Generator_loss, var_list=G_vars)
             self.d_A_optim = Adam.minimize(self.D_A_loss, var_list=d_A_vars)
             self.d_B_optim = Adam.minimize(self.D_B_loss, var_list=d_B_vars)
 
 
         """" Summary """
 
-        self.g_A_loss_sum = tf.summary.scalar("g_A_loss", self.G_A_loss)
-        self.g_B_loss_sum = tf.summary.scalar("g_B_loss", self.G_B_loss)
-        self.g_loss = tf.summary.merge([self.g_A_loss_sum, self.g_B_loss_sum])
+        self.g_loss = tf.summary.scalar("G_loss", self.Generator_loss)
 
         self.d_A_loss_sum = tf.summary.scalar("d_A_loss", self.D_A_loss)
         self.d_B_loss_sum = tf.summary.scalar("d_B_loss", self.D_B_loss)
@@ -196,15 +193,15 @@ class CycleGAN(object):
 
                 self.rotating('train')
 
-                # Update G
-                fake_A, fake_B, _, _, summary_str = self.sess.run(
-                    [self.fake_A, self.fake_B, self.g_A_optim, self.g_B_optim, self.g_loss],
-                    feed_dict = {self.domain_A : batch_A_images, self.domain_B : batch_B_images, self.lr : lr})
-                self.writer.add_summary(summary_str, counter)
-
                 # Update D
                 _, _, summary_str = self.sess.run(
                     [self.d_A_optim, self.d_B_optim, self.d_loss],
+                    feed_dict = {self.domain_A : batch_A_images, self.domain_B : batch_B_images, self.lr : lr})
+                self.writer.add_summary(summary_str, counter)
+
+                # Update G
+                fake_A, fake_B, _, summary_str = self.sess.run(
+                        [self.fake_A, self.fake_B, self.Generator_loss, self.g_loss],
                     feed_dict = {self.domain_A : batch_A_images, self.domain_B : batch_B_images, self.lr : lr})
                 self.writer.add_summary(summary_str, counter)
 
@@ -316,7 +313,7 @@ class CycleGAN(object):
             print('Processing image: ' + sample_file)
             image_path = os.path.join(self.result_dir,'{0}'.format(os.path.basename(sample_file)))
 
-            fake_img = self.sess.run(self.fake_B, feed_dict = {self.domain_B : sample_file})
+            fake_img = self.sess.run(self.fake_A, feed_dict = {self.domain_B : sample_file})
             save_images(fake_img, [1, 1], image_path)
             index.write("<td>%s</td>" % os.path.basename(image_path))
             index.write("<td><img src='%s'></td>" % (sample_file if os.path.isabs(sample_file) else (
