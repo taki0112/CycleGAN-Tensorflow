@@ -6,6 +6,7 @@ Simple Tensorflow implementation of CycleGAN
 
 ## Related works
 * [DiscoGAN](https://github.com/taki0112/DiscoGAN-Tensorflow)
+* [TripleGAN](https://github.com/taki0112/TripleGAN-Tensorflow)
 
 ## Author
 Junho Kim
