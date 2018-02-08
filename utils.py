@@ -5,37 +5,33 @@ import os
 import numpy as np
 
 
-def prepare_data(dataset_name):
-    data_path = os.path.join("./datasets", dataset_name)
+def prepare_data(dataset_name, size):
+    data_path = os.path.join("./dataset", dataset_name)
 
     trainA = []
     trainB = []
-    testA = []
-    testB = []
     for path, dir, files in os.walk(data_path):
         for file in files:
             image = os.path.join(path, file)
             if path.__contains__('trainA') :
-                trainA.append(misc.imresize(misc.imread(image), [256, 256]))
+                trainA.append(misc.imresize(misc.imread(image), [size, size]))
             if path.__contains__('trainB') :
-                trainB.append(misc.imresize(misc.imread(image), [256, 256]))
-            if path.__contains__('testA') :
-                testA.append(misc.imresize(misc.imread(image), [256, 256]))
-            if path.__contains__('testB') :
-                testB.append(misc.imresize(misc.imread(image), [256, 256]))
+                trainB.append(misc.imresize(misc.imread(image), [size, size]))
 
 
     trainA = preprocessing(np.asarray(trainA))
     trainB = preprocessing(np.asarray(trainB))
-    testA = preprocessing(np.asarray(testA))
-    testB = preprocessing(np.asarray(testB))
 
     np.random.shuffle(trainA)
     np.random.shuffle(trainB)
-    np.random.shuffle(testA)
-    np.random.shuffle(testB)
 
-    return trainA, trainB, testA, testB
+    return trainA, trainB
+
+def load_test_data(image_path, size=256):
+    img = misc.imread(image_path)
+    img = misc.imresize(img, [size, size])
+    img = img/127.5 - 1
+    return img
 
 def preprocessing(x):
     """

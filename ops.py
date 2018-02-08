@@ -3,31 +3,32 @@ from tensorflow.contrib.layers import variance_scaling_initializer, batch_norm
 from tensorflow.contrib.framework import arg_scope
 import random
 initializer = tf.truncated_normal_initializer(stddev=0.02)
+
 class ImagePool:
-  """ History of generated images
-      Same logic as https://github.com/junyanz/CycleGAN/blob/master/util/image_pool.lua
-  """
-  def __init__(self, pool_size):
-    self.pool_size = pool_size
-    self.images = []
+    """ History of generated images
+        Same logic as https://github.com/junyanz/CycleGAN/blob/master/util/image_pool.lua
+    """
+    def __init__(self, pool_size):
+        self.pool_size = pool_size
+        self.images = []
 
-  def query(self, image):
-    if self.pool_size == 0:
-      return image
+    def query(self, image):
+        if self.pool_size == 0:
+            return image
 
-    if len(self.images) < self.pool_size:
-      self.images.append(image)
-      return image
-    else:
-      p = random.random()
-      if p > 0.5:
-        # use old image
-        random_id = random.randrange(0, self.pool_size)
-        tmp = self.images[random_id].copy()
-        self.images[random_id] = image.copy()
-        return tmp
-      else:
-        return image
+        if len(self.images) < self.pool_size:
+            self.images.append(image)
+            return image
+        else:
+            p = random.random()
+            if p > 0.5:
+                # use old image
+                random_id = random.randrange(0, self.pool_size)
+                tmp = self.images[random_id].copy()
+                self.images[random_id] = image.copy()
+                return tmp
+            else:
+                return image
 
 def conv_layer(x, filter_size, kernel, stride=1, padding="VALID",do_norm=True, norm='instance', is_training=True, do_relu=True, leak=0, layer_name="conv"):
     with tf.variable_scope(layer_name):
