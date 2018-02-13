@@ -262,7 +262,8 @@ class CycleGAN(object):
         tf.global_variables_initializer().run()
         test_A_files = glob('./dataset/{}/*.*'.format(self.dataset_name + '/testA'))
         test_B_files = glob('./dataset/{}/*.*'.format(self.dataset_name + '/testB'))
-
+        
+        self.saver = tf.train.Saver()
         could_load, checkpoint_counter = self.load(self.checkpoint_dir)
 
         if could_load :
@@ -284,10 +285,10 @@ class CycleGAN(object):
             fake_img = self.sess.run(self.fake_B, feed_dict = {self.domain_A :sample_image})
             save_images(fake_img, [1, 1], image_path)
             index.write("<td>%s</td>" % os.path.basename(image_path))
-            index.write("<td><img src='%s'></td>" % (sample_file if os.path.isabs(sample_file) else (
-                '..' + os.path.sep + sample_file)))
-            index.write("<td><img src='%s'></td>" % (image_path if os.path.isabs(image_path) else (
-                '..' + os.path.sep + image_path)))
+            index.write("<td><img src='%s' width='%d' height='%d'></td>" % (sample_file if os.path.isabs(sample_file) else (
+                '..' + os.path.sep + sample_file), self.width, self.height))
+            index.write("<td><img src='%s' width='%d' height='%d'></td>" % (image_path if os.path.isabs(image_path) else (
+                '..' + os.path.sep + image_path), self.width, self.height))
             index.write("</tr>")
 
         for sample_file  in test_B_files : # B -> A
@@ -298,9 +299,9 @@ class CycleGAN(object):
             fake_img = self.sess.run(self.fake_A, feed_dict = {self.domain_B : sample_image})
             save_images(fake_img, [1, 1], image_path)
             index.write("<td>%s</td>" % os.path.basename(image_path))
-            index.write("<td><img src='%s'></td>" % (sample_file if os.path.isabs(sample_file) else (
-                '..' + os.path.sep + sample_file)))
-            index.write("<td><img src='%s'></td>" % (image_path if os.path.isabs(image_path) else (
-                '..' + os.path.sep + image_path)))
+            index.write("<td><img src='%s' width='%d' height='%d'></td>" % (sample_file if os.path.isabs(sample_file) else (
+                '..' + os.path.sep + sample_file), self.width, self.height))
+            index.write("<td><img src='%s' width='%d' height='%d'></td>" % (image_path if os.path.isabs(image_path) else (
+                '..' + os.path.sep + image_path), self.width, self.height))
             index.write("</tr>")
         index.close()
