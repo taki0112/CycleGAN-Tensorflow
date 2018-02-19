@@ -14,8 +14,10 @@ def parse_args():
     parser.add_argument('--dis_layer', type=int, default=3, help='The number of discriminator layer')
     parser.add_argument('--res_block', type=int, default=6, help='The number of res_block')
     parser.add_argument('--norm', type=str, default='instance', help='instance or batch')
-    parser.add_argument('--lambda1', type=int, default=10, help='reconstruction_loss')
-    parser.add_argument('--lambda2', type=int, default=10, help='reconstruction_loss')
+    parser.add_argument('--lambdaA', type=float, default=10.0, help='reconstruction_loss')
+    parser.add_argument('--lambdaB', type=float, default=10.0, help='reconstruction_loss')
+    parser.add_argument('--identity', type=float, default=0.5, help='use identity mapping. Setting identity other than 1 has an effect of scaling the weight of the identity mapping loss.'
+                                      'For example, if the weight of the identity loss should be 10 times smaller than the weight of the reconstruction loss, please set optidentity = 0.1')
     parser.add_argument('--lr', type=float, default=2e-4, help='learning_rate')
     parser.add_argument('--beta1', type=float, default=0.5, help='Adam')
     parser.add_argument('--pool_size', type=int, default=50, help='discriminator pool')
@@ -67,9 +69,7 @@ def main():
 
     # open session
     with tf.Session(config=tf.ConfigProto(allow_soft_placement=True)) as sess:
-        gan = CycleGAN(sess, epoch=args.epoch, dataset=args.dataset, batch_size=args.batch_size, norm=args.norm, learning_rate=args.lr, do_resnet=args.do_resnet,
-                       lambda1=args.lambda1, lambda2=args.lambda2, beta1=args.beta1, pool_size=args.pool_size, dis_layer=args.dis_layer, res_block=args.res_block,
-                       checkpoint_dir=args.checkpoint_dir, result_dir=args.result_dir, log_dir=args.log_dir, sample_dir=args.sample_dir)
+        gan = CycleGAN(sess, args)
 
         # build graph
         gan.build_model()

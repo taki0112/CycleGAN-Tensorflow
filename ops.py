@@ -2,6 +2,7 @@ import tensorflow as tf
 from tensorflow.contrib.layers import variance_scaling_initializer, batch_norm
 from tensorflow.contrib.framework import arg_scope
 import random
+import tensorflow.contrib as tf_contrib
 initializer = tf.truncated_normal_initializer(stddev=0.02)
 
 class ImagePool:
@@ -75,7 +76,8 @@ def deconv_layer(x, filter_size, kernel, stride=1, padding="VALID",do_norm=True,
 
         return x
 
-def instance_norm(x):
+def instance_norm(x, scope='instance'):
+    """
     with tf.variable_scope("instance_norm"):
         epsilon = 1e-5
         mean, var = tf.nn.moments(x, [1, 2], keep_dims=True)
@@ -85,8 +87,14 @@ def instance_norm(x):
         out = scale * tf.div(x - mean, tf.sqrt(var + epsilon)) + offset
 
         return out
+    """
+    return tf_contrib.layers.instance_norm(x,
+                                           epsilon=1e-05,
+                                           center=True, scale=True,
+                                           scope=scope)
 
-def Batch_Normalization(x, training, scope='batch_norm'):
+def Batch_Normalization(x, training=False, scope='batch_norm'):
+    """
     with arg_scope([batch_norm],
                    scope=scope,
                    updates_collections=None,
@@ -97,9 +105,13 @@ def Batch_Normalization(x, training, scope='batch_norm'):
         return tf.cond(training,
                        lambda : batch_norm(inputs=x, is_training=training, reuse=None),
                        lambda : batch_norm(inputs=x, is_training=training, reuse=True))
-
+    """
+    return tf_contrib.layers.batch_norm(x,
+                                        decay=0.9, epsilon=1e-05,
+                                        center=True, scale=True, updates_collections=None,
+                                        is_training=training, scope=scope)
 def lrelu(x, leak=0.2):
-    return tf.maximum(x, leak * x)
+    return tf.nn.leaky_relu(x, leak)
 
 def tanh(x):
     return tf.tanh(x)

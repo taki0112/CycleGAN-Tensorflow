@@ -4,30 +4,31 @@ from glob import glob
 import time
 
 class CycleGAN(object):
-    def __init__(self, sess, epoch, dataset, batch_size, norm, learning_rate, do_resnet, lambda1, lambda2, beta1, pool_size, dis_layer, res_block, checkpoint_dir, result_dir, log_dir, sample_dir):
+    def __init__(self, sess, args):
         self.model_name = 'CycleGAN'
         self.sess = sess
-        self.checkpoint_dir = checkpoint_dir
-        self.result_dir = result_dir
-        self.log_dir = log_dir
-        self.sample_dir = sample_dir
-        self.dataset_name = dataset
+        self.checkpoint_dir = args.checkpoint_dir
+        self.result_dir = args.result_dir
+        self.log_dir = args.log_dir
+        self.sample_dir = args.sample_dir
+        self.dataset_name = args.dataset
 
         self.print_freq = 100
         self.decay_step = 100
-        self.epoch = epoch
-        self.batch_size = batch_size
-        self.norm = norm
+        self.epoch = args.epoch
+        self.batch_size = args.batch_size
+        self.norm = args.norm
 
-        self.do_resnet = do_resnet
-        self.learning_rate = learning_rate
-        self.lambda1 = lambda1
-        self.lambda2 = lambda2
-        self.beta1 = beta1
-        self.dis_layer = dis_layer
-        self.res_block = res_block
+        self.do_resnet = args.do_resnet
+        self.learning_rate = args.learning_rate
+        self.lambdaA = args.lambdaA
+        self.lambdaB = args.lambdaB
+        self.identity = args.identity
+        self.beta1 = args.beta1
+        self.dis_layer = args.dis_layer
+        self.res_block = args.res_block
 
-        self.pool_size = pool_size
+        self.pool_size = args.pool_size
         self.height = 256
         self.width = 256
         self.channel = 3
@@ -112,8 +113,14 @@ class CycleGAN(object):
         self.fake_B = self.generator(self.domain_A, self.res_block, is_training=True, scope='generator_B') # B'
         self.fake_A = self.generator(self.domain_B, self.res_block, is_training=True, scope='generator_A') # A'
 
+        self.test_B = self.generator(self.domain_A, self.res_block, is_training=False, scope='generator_B')
+        self.test_A = self.generator(self.domain_B, self.res_block, is_training=False, scope='generator_A')
+
         self.recon_A = self.generator(self.fake_B, self.res_block, is_training=True, reuse=True, scope='generator_A') # A -> B' -> A
         self.recon_B = self.generator(self.fake_A, self.res_block, is_training=True, reuse=True, scope='generator_B') # B -> A -> B
+
+        self.identity_A = self.generator(self.domainA, self.res_block, is_training=True, reuse=True, scope='generator_A')
+        self.identity_B = self.generator(self.domain_B, self.res_block, is_training=True, reuse=True, scope='generator_B')
 
         # Discriminator
         self.dis_real_A = self.discriminator(self.domain_A, self.dis_layer, is_training=True, scope='discriminator_A')
@@ -126,8 +133,13 @@ class CycleGAN(object):
         self.dis_fake_pool_B = self.discriminator(self.fake_B_pool.query(self.fake_B), self.dis_layer, is_training=True, reuse=True, scope='discriminator_B')
 
         """ Loss Function """
-        self.G_A_loss = tf.reduce_mean(tf.squared_difference(self.dis_fake_A, 1)) + self.lambda1*(tf.reduce_mean(tf.abs(self.domain_A - self.recon_A)))
-        self.G_B_loss = tf.reduce_mean(tf.squared_difference(self.dis_fake_B, 1)) + self.lambda2*(tf.reduce_mean(tf.abs(self.domain_B - self.recon_B)))
+        self.G_A_loss = tf.reduce_mean(tf.squared_difference(self.dis_fake_A, 1)) + \
+                        self.lambdaA*(tf.reduce_mean(tf.abs(self.domain_A - self.recon_A))) + \
+                        self.identity*(tf.reduce_mean(tf.abs(self.domain_A - self.identity_A)))
+        self.G_B_loss = tf.reduce_mean(tf.squared_difference(self.dis_fake_B, 1)) + \
+                        self.lambdaB*(tf.reduce_mean(tf.abs(self.domain_B - self.recon_B))) + \
+                        self.identity*(tf.reduce_mean(tf.abs(self.domain_B - self.identity_B)))
+
         self.Generator_loss = self.G_A_loss + self.G_B_loss
 
         self.D_A_loss = (tf.reduce_mean(tf.squared_difference(self.dis_real_A, 1)) + tf.reduce_mean(tf.square(self.dis_fake_pool_A))) / 2.0
@@ -282,7 +294,7 @@ class CycleGAN(object):
             sample_image = np.asarray(load_test_data(sample_file))
             image_path = os.path.join(self.result_dir,'{0}'.format(os.path.basename(sample_file)))
 
-            fake_img = self.sess.run(self.fake_B, feed_dict = {self.domain_A :sample_image})
+            fake_img = self.sess.run(self.test_B, feed_dict = {self.domain_A :sample_image})
             save_images(fake_img, [1, 1], image_path)
             index.write("<td>%s</td>" % os.path.basename(image_path))
             index.write("<td><img src='%s' width='%d' height='%d'></td>" % (sample_file if os.path.isabs(sample_file) else (
@@ -296,7 +308,7 @@ class CycleGAN(object):
             sample_image = np.asarray(load_test_data(sample_file))
             image_path = os.path.join(self.result_dir,'{0}'.format(os.path.basename(sample_file)))
 
-            fake_img = self.sess.run(self.fake_A, feed_dict = {self.domain_B : sample_image})
+            fake_img = self.sess.run(self.test_A, feed_dict = {self.domain_B : sample_image})
             save_images(fake_img, [1, 1], image_path)
             index.write("<td>%s</td>" % os.path.basename(image_path))
             index.write("<td><img src='%s' width='%d' height='%d'></td>" % (sample_file if os.path.isabs(sample_file) else (
