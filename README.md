@@ -8,6 +8,7 @@ Simple Tensorflow implementation of CycleGAN
 * [DiscoGAN](https://github.com/taki0112/DiscoGAN-Tensorflow)
 * [UNIT](https://github.com/taki0112/UNIT-Tensorflow)
 * [TripleGAN](https://github.com/taki0112/TripleGAN-Tensorflow)
+* [MUNIT](https://github.com/taki0112/MUNIT-Tensorflow)
 
 ## Author
 Junho Kim
