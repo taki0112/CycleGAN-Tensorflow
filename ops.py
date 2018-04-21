@@ -1,125 +1,135 @@
 import tensorflow as tf
-from tensorflow.contrib.layers import variance_scaling_initializer, batch_norm
-from tensorflow.contrib.framework import arg_scope
-import random
 import tensorflow.contrib as tf_contrib
-initializer = tf.truncated_normal_initializer(stddev=0.02)
 
-class ImagePool:
-    """ History of generated images
-        Same logic as https://github.com/junyanz/CycleGAN/blob/master/util/image_pool.lua
-    """
-    def __init__(self, pool_size):
-        self.pool_size = pool_size
-        self.images = []
+weight_init = tf.random_normal_initializer(mean=0.0, stddev=0.02)
+weight_regularizer = None
 
-    def query(self, image):
-        if self.pool_size == 0:
-            return image
+##################################################################################
+# Layer
+##################################################################################
 
-        if len(self.images) < self.pool_size:
-            self.images.append(image)
-            return image
-        else:
-            p = random.random()
-            if p > 0.5:
-                # use old image
-                random_id = random.randrange(0, self.pool_size)
-                tmp = self.images[random_id].copy()
-                self.images[random_id] = image.copy()
-                return tmp
-            else:
-                return image
+def conv(x, channels, kernel=4, stride=2, pad=0, pad_type='zero', use_bias=True, scope='conv'):
+    with tf.variable_scope(scope):
+        if pad_type == 'zero' :
+            x = tf.pad(x, [[0, 0], [pad, pad], [pad, pad], [0, 0]])
+        if pad_type == 'reflect' :
+            x = tf.pad(x, [[0, 0], [pad, pad], [pad, pad], [0, 0]], mode='REFLECT')
 
-def conv_layer(x, filter_size, kernel, stride=1, padding="VALID",do_norm=True, norm='instance', is_training=True, do_relu=True, leak=0, layer_name="conv"):
-    with tf.variable_scope(layer_name):
-        if padding == 1 :
-            x = tf.pad(x, [[0,0], [1,1], [1,1], [0,0]])
-            x = tf.layers.conv2d(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=initializer, strides=stride)
-        else :
-            x = tf.layers.conv2d(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=initializer, strides=stride, padding=padding)
-
-        if do_norm:
-            if norm == 'instance' :
-                x = instance_norm(x)
-            else :
-                x = Batch_Normalization(x, training=is_training)
-
-        if do_relu:
-            if leak == 0:
-                x = relu(x)
-            else:
-                x = lrelu(x)
+        x = tf.layers.conv2d(inputs=x, filters=channels,
+                             kernel_size=kernel, kernel_initializer=weight_init,
+                             kernel_regularizer=weight_regularizer,
+                             strides=stride, use_bias=use_bias)
 
         return x
 
-
-def deconv_layer(x, filter_size, kernel, stride=1, padding="VALID",do_norm=True, norm='instance', is_training=True, do_relu=True, leak=0, layer_name="deconv") :
-    with tf.variable_scope(layer_name):
-        if padding == 1 :
-            x = tf.pad(x, [[0,0], [1,1], [1,1], [0,0]])
-            x = tf.layers.conv2d_transpose(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=initializer, strides=stride)
-        else :
-            x = tf.layers.conv2d_transpose(inputs=x, filters=filter_size, kernel_size=kernel, kernel_initializer=initializer, strides=stride, padding=padding)
-
-        if do_norm:
-            if norm == 'instance' :
-                x = instance_norm(x)
-            else :
-                x = Batch_Normalization(x, training=is_training)
-
-        if do_relu:
-            if leak == 0 :
-                x = relu(x)
-            else:
-                x = lrelu(x)
+def deconv(x, channels, kernel=3, stride=2, use_bias=True, scope='deconv_0') :
+    with tf.variable_scope(scope):
+        x = tf.layers.conv2d_transpose(inputs=x, filters=channels,
+                                       kernel_size=kernel, kernel_initializer=weight_init,
+                                       kernel_regularizer=weight_regularizer,
+                                       strides=stride, use_bias=use_bias, padding='SAME')
 
         return x
 
-def instance_norm(x, scope='instance'):
-    """
-    with tf.variable_scope("instance_norm"):
-        epsilon = 1e-5
-        mean, var = tf.nn.moments(x, [1, 2], keep_dims=True)
-        scale = tf.get_variable('scale', [x.get_shape()[-1]],
-                                initializer=tf.truncated_normal_initializer(mean=1.0, stddev=0.02))
-        offset = tf.get_variable('offset', [x.get_shape()[-1]], initializer=tf.constant_initializer(0.0))
-        out = scale * tf.div(x - mean, tf.sqrt(var + epsilon)) + offset
+def linear(x, units, use_bias=True, scope='linear'):
+    with tf.variable_scope(scope):
+        x = flatten(x)
+        x = tf.layers.dense(x, units=units, kernel_initializer=weight_init, kernel_regularizer=weight_regularizer, use_bias=use_bias)
 
-        return out
-    """
+        return x
+
+def flatten(x) :
+    return tf.layers.flatten(x)
+
+##################################################################################
+# Residual-block
+##################################################################################
+
+def resblock(x_init, channels, use_bias=True, scope='resblock'):
+    with tf.variable_scope(scope):
+        with tf.variable_scope('res1'):
+            x = conv(x_init, channels, kernel=3, stride=1, pad=1, pad_type='reflect', use_bias=use_bias)
+            x = instance_norm(x)
+            x = relu(x)
+
+        with tf.variable_scope('res2'):
+            x = conv(x, channels, kernel=3, stride=1, pad=1, pad_type='reflect', use_bias=use_bias)
+            x = instance_norm(x)
+
+        return x + x_init
+
+
+##################################################################################
+# Activation function
+##################################################################################
+
+def lrelu(x, alpha=0.01):
+    # pytorch alpha is 0.01
+    return tf.nn.leaky_relu(x, alpha)
+
+
+def relu(x):
+    return tf.nn.relu(x)
+
+
+def tanh(x):
+    return tf.tanh(x)
+
+##################################################################################
+# Normalization function
+##################################################################################
+
+def instance_norm(x, scope='instance_norm'):
     return tf_contrib.layers.instance_norm(x,
                                            epsilon=1e-05,
                                            center=True, scale=True,
                                            scope=scope)
 
-def Batch_Normalization(x, training=False, scope='batch_norm'):
-    """
-    with arg_scope([batch_norm],
-                   scope=scope,
-                   updates_collections=None,
-                   decay=0.9,
-                   center=True,
-                   scale=True,
-                   zero_debias_moving_mean=True) :
-        return tf.cond(training,
-                       lambda : batch_norm(inputs=x, is_training=training, reuse=None),
-                       lambda : batch_norm(inputs=x, is_training=training, reuse=True))
-    """
-    return tf_contrib.layers.batch_norm(x,
-                                        decay=0.9, epsilon=1e-05,
-                                        center=True, scale=True, updates_collections=None,
-                                        is_training=training, scope=scope)
-def lrelu(x, leak=0.2):
-    return tf.nn.leaky_relu(x, leak)
+##################################################################################
+# Loss function
+##################################################################################
 
-def tanh(x):
-    return tf.tanh(x)
+def discriminator_loss(type, real, fake):
+    n_scale = len(real)
+    loss = []
 
-def relu(x):
-    return tf.nn.relu(x)
+    real_loss = 0
+    fake_loss = 0
 
-def swish(x): # may be it will be test
-    return x * tf.sigmoid(x)
+    for i in range(n_scale) :
+        if type == 'lsgan' :
+            real_loss = 0.5 * tf.reduce_mean(tf.squared_difference(real[i], 1.0))
+            fake_loss = 0.5 * tf.reduce_mean(tf.square(fake[i]))
+
+        if type == 'gan' :
+            real_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(real[i]), logits=real[i]))
+            fake_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.zeros_like(fake[i]), logits=fake[i]))
+
+        loss.append(real_loss + fake_loss)
+
+    return sum(loss)
 
 
+def generator_loss(type, fake):
+    n_scale = len(fake)
+    loss = []
+
+    fake_loss = 0
+
+    for i in range(n_scale) :
+        if type == 'lsgan' :
+            fake_loss = tf.reduce_mean(tf.squared_difference(fake[i], 1.0))
+
+        if type == 'gan' :
+            fake_loss = tf.reduce_mean(tf.nn.sigmoid_cross_entropy_with_logits(labels=tf.ones_like(fake[i]), logits=fake[i]))
+
+        loss.append(fake_loss)
+
+
+    return sum(loss)
+
+
+def L1_loss(x, y):
+    loss = tf.reduce_mean(tf.abs(x - y))
+
+    return loss

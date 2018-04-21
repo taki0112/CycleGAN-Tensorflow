@@ -2,8 +2,9 @@ from ops import *
 from utils import *
 from glob import glob
 import time
+from tensorflow.contrib.data import batch_and_drop_remainder
 
-class CycleGAN(object):
+class CycleGAN(object) :
     def __init__(self, sess, args):
         self.model_name = 'CycleGAN'
         self.sess = sess
@@ -12,160 +13,243 @@ class CycleGAN(object):
         self.log_dir = args.log_dir
         self.sample_dir = args.sample_dir
         self.dataset_name = args.dataset
+        self.augment_flag = args.augment_flag
 
-        self.print_freq = 100
-        self.decay_step = 100
         self.epoch = args.epoch
+        self.iteration = args.iteration
+        self.gan_type = args.gan_type
+
         self.batch_size = args.batch_size
-        self.norm = args.norm
+        self.print_freq = args.print_freq
+        self.save_freq = args.save_freq
 
-        self.do_resnet = args.do_resnet
-        self.learning_rate = args.learning_rate
-        self.lambdaA = args.lambdaA
-        self.lambdaB = args.lambdaB
-        self.identity = args.identity
-        self.beta1 = args.beta1
-        self.dis_layer = args.dis_layer
-        self.res_block = args.res_block
+        self.img_size = args.img_size
+        self.img_ch = args.img_ch
 
-        self.pool_size = args.pool_size
-        self.height = 256
-        self.width = 256
-        self.channel = 3
+        self.init_lr = args.lr
+        self.ch = args.ch
 
-        self.trainA, self.trainB = prepare_data(dataset_name=self.dataset_name)
-        self.num_batches = max(len(self.trainA) // self.batch_size, len(self.trainB) // self.batch_size)
-        # may be i will use deque
+        """ Weight """
+        self.gan_w = args.gan_w
+        self.cycle_w = args.cycle_w
+        self.identity_w = args.identity_w
 
 
-    def resnet_block(self, x_init, dim, do_resnet, is_training=True, reuse=False, scope="resnet"):
-        with tf.variable_scope(scope, reuse=reuse):
-            x = tf.pad(x_init, [[0, 0], [1, 1], [1, 1], [0, 0]], "REFLECT")
-            x = conv_layer(x, filter_size=dim, kernel=[3, 3], stride=1, norm=self.norm, is_training=is_training, layer_name='conv1')
-            x = tf.pad(x, [[0, 0], [1, 1], [1, 1], [0, 0]], "REFLECT")
-            x = conv_layer(x, filter_size=dim, kernel=[3, 3], stride=1, norm=self.norm, is_training=is_training, do_relu=False, layer_name='conv2')
+        """ Generator """
+        self.n_res = args.n_res
 
-            if do_resnet :
-                return relu(x + x_init)
-            else :
-                return relu(x)
+        """ Discriminator """
+        self.n_dis = args.n_dis
 
-    def generator(self, x, n_blocks, is_training=True, reuse=False, scope="generator"):
-        with tf.variable_scope(scope, reuse=reuse):
+        self.sample_dir = os.path.join(args.sample_dir, self.model_dir)
+        check_folder(self.sample_dir)
 
-            x = tf.pad(x, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
-            x = conv_layer(x, filter_size=32, kernel=[7, 7], stride=1, norm=self.norm, is_training=is_training, layer_name='conv1')
+        self.trainA_dataset = glob('./dataset/{}/*.*'.format(self.dataset_name + '/trainA'))
+        self.trainB_dataset = glob('./dataset/{}/*.*'.format(self.dataset_name + '/trainB'))
+        self.dataset_num = max(len(self.trainA_dataset), len(self.trainB_dataset))
 
-            n_downsampling = 2
+        print("##### Information #####")
+        print("# gan type : ", self.gan_type)
+        print("# dataset : ", self.dataset_name)
+        print("# max dataset number : ", self.dataset_num)
+        print("# batch_size : ", self.batch_size)
+        print("# epoch : ", self.epoch)
+        print("# iteration per epoch : ", self.iteration)
 
-            for i in range(n_downsampling):
-                mult = pow(2, i)
-                x = conv_layer(x, filter_size=32 * mult * 2, kernel=[3, 3], stride=2, padding=1,
-                               norm=self.norm, is_training=is_training, layer_name='conv' + str(i + 2))
+        print()
 
-            mult = pow(2, n_downsampling)
-            for i in range(n_blocks):
-                x = self.resnet_block(x, dim=32 * mult, do_resnet=self.do_resnet, is_training=is_training, reuse=reuse, scope='resblock' + str(i))
+        print("##### Generator #####")
+        print("# residual blocks : ", self.n_res)
 
-            for i in range(n_downsampling):
-                mult = pow(2, (n_downsampling - i))
-                x = deconv_layer(x, filter_size=(32 * mult) / 2, kernel=[3, 3], stride=2, padding=1,
-                                 norm=self.norm, is_training=is_training, layer_name='deconv' + str(i))
+        print()
 
-            x = tf.pad(x, [[0, 0], [3, 3], [3, 3], [0, 0]], "REFLECT")
-            x = conv_layer(x, filter_size=3, kernel=[7, 7], norm=self.norm, is_training=is_training, do_relu=False, layer_name='conv4')
+        print("##### Discriminator #####")
+        print("# Discriminator layer : ", self.n_dis)
+
+    ##################################################################################
+    # Generator
+    ##################################################################################
+
+    def generator(self, x, reuse=False, scope="generator"):
+        channel = self.ch
+        with tf.variable_scope(scope, reuse=reuse) :
+            x = conv(x, channel, kernel=7, stride=1, pad=3, pad_type='reflect', scope='conv_0')
+            x = instance_norm(x, scope='ins_0')
+            x = relu(x)
+
+            # Down-Sampling
+            for i in range(2) :
+                x = conv(x, channel*2, kernel=3, stride=2, pad=1, scope='conv_'+str(i+1))
+                x = instance_norm(x, scope='down_ins_'+str(i+1))
+                x = relu(x)
+
+                channel = channel * 2
+
+            # Bottle-neck
+            for i in range(self.n_res) :
+                x = resblock(x, channel, scope='resblock_'+str(i))
+
+            # Up-Sampling
+            for i in range(2) :
+                x = deconv(x, channel//2, kernel=3, stride=2, scope='deconv_'+str(i+1))
+                x = instance_norm(x, scope='up_ins_'+str(i+1))
+                x = relu(x)
+
+                channel = channel // 2
+
+            x = conv(x, channels=3, kernel=7, stride=1, pad=3, pad_type='reflect', scope='G_logit')
             x = tanh(x)
 
             return x
 
-    def discriminator(self, x, n_layers, is_training=True, reuse=False, scope="discriminator"):
-        with tf.variable_scope(scope, reuse=reuse):
-            x = conv_layer(x, filter_size=64, kernel=[4, 4], stride=2, padding=1, do_norm=False, is_training=is_training, leak=0.2,
-                           layer_name='conv1')
+    ##################################################################################
+    # Discriminator
+    ##################################################################################
 
-            for n in range(1, n_layers):  # n_layer=3, 1 2
-                nf_mult = min(2 ** n, 8)
-                x = conv_layer(x, filter_size=64 * nf_mult, kernel=[4, 4], stride=2, padding=1, norm=self.norm, is_training=is_training, leak=0.2,
-                               layer_name='conv' + str(n + 1))
+    def discriminator(self, x, reuse=False, scope="discriminator"):
+        channel = self.ch
+        with tf.variable_scope(scope, reuse=reuse) :
+            x = conv(x, channel, kernel=4, stride=2, pad=1, scope='conv_0')
+            x = lrelu(x, 0.2)
 
-            nf_mult = min(2 ** n_layers, 8)
-            x = conv_layer(x, filter_size=64 * nf_mult, kernel=[4, 4], stride=1, padding=1, norm=self.norm, is_training=is_training, leak=0.2,
-                           layer_name='conv' + str(n_layers + 1))
+            for i in range(1, self.n_dis) :
+                x = conv(x, channel*2, kernel=4, stride=2, pad=1, scope='conv_'+str(i))
+                x = instance_norm(x, scope='ins_'+str(i))
+                x = lrelu(x, 0.2)
 
-            x = conv_layer(x, filter_size=1, kernel=[4, 4], stride=1, padding=1, do_norm=False, is_training=is_training, do_relu=False,
-                           layer_name='conv' + str(n_layers + 2))
+                channel = channel * 2
+
+            x = conv(x, channel*2, kernel=4, stride=1, pad=1, scope='conv_'+str(self.n_dis))
+            x = instance_norm(x, scope='ins_'+str(self.n_dis))
+            x = lrelu(x, 0.2)
+
+            x = conv(x, channels=1, kernel=4, stride=1, pad=1, scope='D_logit')
 
             return x
+
+    ##################################################################################
+    # Model
+    ##################################################################################
+
+    def generate_a2b(self, x_A, reuse=False):
+        x_ab = self.generator(x_A, reuse=reuse, scope='generator_A')
+
+        return x_ab
+
+    def generate_b2a(self, x_B, reuse=False):
+        x_ba = self.generator(x_B, reuse=reuse, scope='generator_A')
+
+        return x_ba
+
+    def discriminate_real(self, x_A, x_B):
+        real_A_logit = self.discriminator(x_A, scope="discriminator_A")
+        real_B_logit = self.discriminator(x_B, scope="discriminator_B")
+
+        return real_A_logit, real_B_logit
+
+    def discriminate_fake(self, x_ba, x_ab):
+        fake_A_logit = self.discriminator(x_ba, reuse=True, scope="discriminator_A")
+        fake_B_logit = self.discriminator(x_ab, reuse=True, scope="discriminator_B")
+
+        return fake_A_logit, fake_B_logit
+
     def build_model(self):
-        self.domain_A = tf.placeholder(tf.float32, [self.batch_size, self.width, self.height, self.channel], name='domain_A') # real A
-        self.domain_B = tf.placeholder(tf.float32, [self.batch_size, self.width, self.height, self.channel], name='domain_B') # real B
-
-        # self.fake_A_sample = tf.placeholder(tf.float32, [self.batch_size, self.width, self.height, self.channel], name='fake_A_sample')
-        # self.fake_B_sample = tf.placeholder(tf.float32, [self.batch_size, self.width, self.height, self.channel], name='fake_B_sample')
-
-        self.fake_A_pool = ImagePool(self.pool_size) # A로 generate된 이미지들의 pool
-        self.fake_B_pool = ImagePool(self.pool_size) # B로 generate된 이미지들의 pool
-
         self.lr = tf.placeholder(tf.float32, name='learning_rate')
 
-        """ Define Generator, Discriminator """
-        # Generator
-        self.fake_B = self.generator(self.domain_A, self.res_block, is_training=True, scope='generator_B') # B'
-        self.fake_A = self.generator(self.domain_B, self.res_block, is_training=True, scope='generator_A') # A'
+        """ Input Image"""
+        Image_Data_Class = ImageData(self.img_size, self.img_ch, self.augment_flag)
 
-        self.test_B = self.generator(self.domain_A, self.res_block, is_training=False, scope='generator_B')
-        self.test_A = self.generator(self.domain_B, self.res_block, is_training=False, scope='generator_A')
+        trainA = tf.data.Dataset.from_tensor_slices(self.trainA_dataset)
+        trainB = tf.data.Dataset.from_tensor_slices(self.trainB_dataset)
 
-        self.recon_A = self.generator(self.fake_B, self.res_block, is_training=True, reuse=True, scope='generator_A') # A -> B' -> A
-        self.recon_B = self.generator(self.fake_A, self.res_block, is_training=True, reuse=True, scope='generator_B') # B -> A -> B
+        trainA = trainA.prefetch(self.batch_size).shuffle(self.dataset_num).map(Image_Data_Class.image_processing, num_parallel_calls=8).apply(batch_and_drop_remainder(self.batch_size)).repeat()
+        trainB = trainB.prefetch(self.batch_size).shuffle(self.dataset_num).map(Image_Data_Class.image_processing, num_parallel_calls=8).apply(batch_and_drop_remainder(self.batch_size)).repeat()
 
-        self.identity_A = self.generator(self.domainA, self.res_block, is_training=True, reuse=True, scope='generator_A')
-        self.identity_B = self.generator(self.domain_B, self.res_block, is_training=True, reuse=True, scope='generator_B')
+        trainA_iterator = trainA.make_one_shot_iterator()
+        trainB_iterator = trainB.make_one_shot_iterator()
 
-        # Discriminator
-        self.dis_real_A = self.discriminator(self.domain_A, self.dis_layer, is_training=True, scope='discriminator_A')
-        self.dis_real_B = self.discriminator(self.domain_B, self.dis_layer, is_training=True, scope='discriminator_B')
 
-        self.dis_fake_A = self.discriminator(self.fake_A, self.dis_layer, is_training=True, reuse=True, scope='discriminator_A')
-        self.dis_fake_B = self.discriminator(self.fake_B, self.dis_layer, is_training=True, reuse=True, scope='discriminator_B')
+        self.domain_A = trainA_iterator.get_next()
+        self.domain_B = trainB_iterator.get_next()
 
-        self.dis_fake_pool_A = self.discriminator(self.fake_A_pool.query(self.fake_A), self.dis_layer, is_training=True, reuse=True, scope='discriminator_A')
-        self.dis_fake_pool_B = self.discriminator(self.fake_B_pool.query(self.fake_B), self.dis_layer, is_training=True, reuse=True, scope='discriminator_B')
 
-        """ Loss Function """
-        self.G_A_loss = tf.reduce_mean(tf.squared_difference(self.dis_fake_A, 1)) + \
-                        self.lambdaA*(tf.reduce_mean(tf.abs(self.domain_A - self.recon_A))) + \
-                        self.identity*(tf.reduce_mean(tf.abs(self.domain_A - self.identity_A)))
-        self.G_B_loss = tf.reduce_mean(tf.squared_difference(self.dis_fake_B, 1)) + \
-                        self.lambdaB*(tf.reduce_mean(tf.abs(self.domain_B - self.recon_B))) + \
-                        self.identity*(tf.reduce_mean(tf.abs(self.domain_B - self.identity_B)))
+        """ Define Encoder, Generator, Discriminator """
+        x_ab = self.generate_a2b(self.domain_A)
+        x_ba = self.generate_b2a(self.domain_B)
 
-        self.Generator_loss = self.G_A_loss + self.G_B_loss
+        x_aba = self.generate_b2a(x_ab, reuse=True)
+        x_bab = self.generate_a2b(x_ba, reuse=True)
 
-        self.D_A_loss = (tf.reduce_mean(tf.squared_difference(self.dis_real_A, 1)) + tf.reduce_mean(tf.square(self.dis_fake_pool_A))) / 2.0
-        self.D_B_loss = (tf.reduce_mean(tf.squared_difference(self.dis_real_B, 1)) + tf.reduce_mean(tf.square(self.dis_fake_pool_B))) / 2.0
+        if self.identity_w > 0 :
+            x_aa = self.generate_b2a(self.domain_A, reuse=True)
+            x_bb = self.generate_a2b(self.domain_B, reuse=True)
+
+            identity_loss_a = L1_loss(x_aa, self.domain_A)
+            identity_loss_b = L1_loss(x_bb, self.domain_B)
+
+        else :
+            identity_loss_a = 0
+            identity_loss_b = 0
+
+
+        real_A_logit, real_B_logit = self.discriminate_real(self.domain_A, self.domain_B)
+        fake_A_logit, fake_B_logit = self.discriminate_fake(x_ba, x_ab)
+
+        """ Define Loss """
+        G_ad_loss_a = generator_loss(self.gan_type, fake_A_logit)
+        G_ad_loss_b = generator_loss(self.gan_type, fake_B_logit)
+
+        D_ad_loss_a = discriminator_loss(self.gan_type, real_A_logit, fake_A_logit)
+        D_ad_loss_b = discriminator_loss(self.gan_type, real_B_logit, fake_B_logit)
+
+        recon_loss_a = L1_loss(x_aba, self.domain_A) # reconstruction
+        recon_loss_b = L1_loss(x_bab, self.domain_B) # reconstruction
+
+        Generator_A_loss = self.gan_w * G_ad_loss_a + \
+                           self.cycle_w * recon_loss_a + \
+                           self.identity_w * identity_loss_a
+
+        Generator_B_loss = self.gan_w * G_ad_loss_b + \
+                           self.cycle_w * recon_loss_b + \
+                           self.identity_w * identity_loss_b
+
+        Discriminator_A_loss = self.gan_w * D_ad_loss_a
+        Discriminator_B_loss = self.gan_w * D_ad_loss_b
+
+        self.Generator_loss = Generator_A_loss + Generator_B_loss
+        self.Discriminator_loss = Discriminator_A_loss + Discriminator_B_loss
 
         """ Training """
         t_vars = tf.trainable_variables()
-        G_vars = [var for var in t_vars if 'generator' in var.name]
-        d_A_vars = [var for var in t_vars if 'discriminator_A' in var.name]
-        d_B_vars = [var for var in t_vars if 'discriminator_B' in var.name]
+        G_vars = [var for var in t_vars if 'decoder' in var.name or 'encoder' in var.name]
+        D_vars = [var for var in t_vars if 'discriminator' in var.name]
 
-        with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-            Adam = tf.train.AdamOptimizer(self.lr, beta1=self.beta1)
-
-            self.G_optim = Adam.minimize(self.Generator_loss, var_list=G_vars)
-            self.d_A_optim = Adam.minimize(self.D_A_loss, var_list=d_A_vars)
-            self.d_B_optim = Adam.minimize(self.D_B_loss, var_list=d_B_vars)
-
+        self.G_optim = tf.train.AdamOptimizer(self.lr, beta1=0.5, beta2=0.999).minimize(self.Generator_loss, var_list=G_vars)
+        self.D_optim = tf.train.AdamOptimizer(self.lr, beta1=0.5, beta2=0.999).minimize(self.Discriminator_loss, var_list=D_vars)
 
         """" Summary """
+        self.all_G_loss = tf.summary.scalar("Generator_loss", self.Generator_loss)
+        self.all_D_loss = tf.summary.scalar("Discriminator_loss", self.Discriminator_loss)
+        self.G_A_loss = tf.summary.scalar("G_A_loss", Generator_A_loss)
+        self.G_B_loss = tf.summary.scalar("G_B_loss", Generator_B_loss)
+        self.D_A_loss = tf.summary.scalar("D_A_loss", Discriminator_A_loss)
+        self.D_B_loss = tf.summary.scalar("D_B_loss", Discriminator_B_loss)
 
-        self.g_loss = tf.summary.scalar("G_loss", self.Generator_loss)
+        self.G_loss = tf.summary.merge([self.G_A_loss, self.G_B_loss, self.all_G_loss])
+        self.D_loss = tf.summary.merge([self.D_A_loss, self.D_B_loss, self.all_D_loss])
 
-        self.d_A_loss_sum = tf.summary.scalar("d_A_loss", self.D_A_loss)
-        self.d_B_loss_sum = tf.summary.scalar("d_B_loss", self.D_B_loss)
-        self.d_loss = tf.summary.merge([self.d_A_loss_sum, self.d_B_loss_sum])
+        """ Image """
+        self.fake_A = x_ba
+        self.fake_B = x_ab
+
+        self.real_A = self.domain_A
+        self.real_B = self.domain_B
+
+        """ Test """
+        self.test_image = tf.placeholder(tf.float32, [1, self.img_size, self.img_size, self.img_ch], name='test_image')
+
+        self.test_fake_A = self.generate_b2a(self.test_image, reuse=True)
+        self.test_fake_B = self.generate_a2b(self.test_image, reuse=True)
 
     def train(self):
         # initialize all variables
@@ -175,14 +259,13 @@ class CycleGAN(object):
         self.saver = tf.train.Saver()
 
         # summary writer
-        self.writer = tf.summary.FileWriter(self.log_dir + '/' + self.model_name, self.sess.graph)
-
+        self.writer = tf.summary.FileWriter(self.log_dir + '/' + self.model_dir, self.sess.graph)
 
         # restore check-point if it exits
         could_load, checkpoint_counter = self.load(self.checkpoint_dir)
         if could_load:
-            start_epoch = (int)(checkpoint_counter / self.num_batches)
-            start_batch_id = checkpoint_counter - start_epoch * self.num_batches
+            start_epoch = (int)(checkpoint_counter / self.iteration)
+            start_batch_id = checkpoint_counter - start_epoch * self.iteration
             counter = checkpoint_counter
             print(" [*] Load SUCCESS")
         else:
@@ -193,61 +276,56 @@ class CycleGAN(object):
 
         # loop for epoch
         start_time = time.time()
+        lr = self.init_lr
         for epoch in range(start_epoch, self.epoch):
-            lr = self.learning_rate if epoch < self.decay_step else self.learning_rate * (self.epoch - epoch) / (self.epoch - self.decay_step)
-            # get batch data
-            for idx in range(start_batch_id, self.num_batches):
-                random_index_A = np.random.choice(len(self.trainA), size=self.batch_size, replace=False)
-                random_index_B = np.random.choice(len(self.trainB), size=self.batch_size, replace=False)
-                batch_A_images = self.trainA[random_index_A]
-                batch_B_images = self.trainB[random_index_B]
+            if epoch == self.epoch // 2 :
+                lr = lr * 0.5
+
+            for idx in range(start_batch_id, self.iteration):
+                train_feed_dict = {
+                    self.lr : lr
+                }
 
                 # Update D
-                _, _, summary_str = self.sess.run(
-                    [self.d_A_optim, self.d_B_optim, self.d_loss],
-                    feed_dict = {self.domain_A : batch_A_images, self.domain_B : batch_B_images, self.lr : lr})
+                _, d_loss, summary_str = self.sess.run([self.D_optim, self.Discriminator_loss, self.D_loss], feed_dict = train_feed_dict)
                 self.writer.add_summary(summary_str, counter)
 
                 # Update G
-                fake_A, fake_B, _, summary_str = self.sess.run(
-                        [self.fake_A, self.fake_B, self.Generator_loss, self.g_loss],
-                    feed_dict = {self.domain_A : batch_A_images, self.domain_B : batch_B_images, self.lr : lr})
+                batch_A_images, batch_B_images, fake_A, fake_B, _, g_loss, summary_str = self.sess.run([self.real_A, self.real_B, self.fake_A, self.fake_B, self.G_optim, self.Generator_loss, self.G_loss], feed_dict = train_feed_dict)
                 self.writer.add_summary(summary_str, counter)
 
                 # display training status
                 counter += 1
-                print("Epoch: [%2d] [%4d/%4d] time: %4.4f" \
-                      % (epoch, idx, self.num_batches, time.time() - start_time))
+                print("Epoch: [%2d] [%6d/%6d] time: %4.4f d_loss: %.8f, g_loss: %.8f" \
+                      % (epoch, idx, self.iteration, time.time() - start_time, d_loss, g_loss))
 
-                if np.mod(counter, 100) == 0 :
+                if np.mod(idx+1, self.print_freq) == 0 :
                     save_images(batch_A_images, [self.batch_size, 1],
-                                './{}/real_A_{:02d}_{:04d}.jpg'.format(self.sample_dir, epoch, idx+2))
-                    save_images(batch_B_images, [self.batch_size, 1],
-                                './{}/real_B_{:02d}_{:04d}.jpg'.format(self.sample_dir, epoch, idx+2))
+                                './{}/real_A_{:02d}_{:06d}.jpg'.format(self.sample_dir, epoch, idx+1))
+                    # save_images(batch_B_images, [self.batch_size, 1],
+                    #             './{}/real_B_{}_{:02d}_{:06d}.jpg'.format(self.sample_dir, gpu_id, epoch, idx+1))
 
-                    save_images(fake_A, [self.batch_size, 1],
-                                './{}/fake_A_{:02d}_{:04d}.jpg'.format(self.sample_dir, epoch, idx+2))
+                    # save_images(fake_A, [self.batch_size, 1],
+                    #             './{}/fake_A_{}_{:02d}_{:06d}.jpg'.format(self.sample_dir, gpu_id, epoch, idx+1))
                     save_images(fake_B, [self.batch_size, 1],
-                                './{}/fake_B_{:02d}_{:04d}.jpg'.format(self.sample_dir, epoch, idx+2))
+                                './{}/fake_B_{:02d}_{:06d}.jpg'.format(self.sample_dir, epoch, idx+1))
 
-                # After an epoch, start_batch_id is set to zero
-                # non-zero value is only for the first epoch after loading pre-trained model
-                start_batch_id = 0
+                if np.mod(idx+1, self.save_freq) == 0 :
+                    self.save(self.checkpoint_dir, counter)
 
-                # save model
-                self.save(self.checkpoint_dir, counter)
+            # After an epoch, start_batch_id is set to zero
+            # non-zero value is only for the first epoch after loading pre-trained model
+            start_batch_id = 0
 
             # save model for final step
             self.save(self.checkpoint_dir, counter)
 
     @property
     def model_dir(self):
-        return "{}_{}_{}".format(
-            self.model_name, self.dataset_name,
-            self.batch_size)
+        return "{}_{}_{}".format(self.model_name, self.dataset_name, self.gan_type)
 
     def save(self, checkpoint_dir, step):
-        checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir, self.model_name)
+        checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
 
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
@@ -257,7 +335,7 @@ class CycleGAN(object):
     def load(self, checkpoint_dir):
         import re
         print(" [*] Reading checkpoints...")
-        checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir, self.model_name)
+        checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
 
         ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
         if ckpt and ckpt.model_checkpoint_path:
@@ -274,9 +352,11 @@ class CycleGAN(object):
         tf.global_variables_initializer().run()
         test_A_files = glob('./dataset/{}/*.*'.format(self.dataset_name + '/testA'))
         test_B_files = glob('./dataset/{}/*.*'.format(self.dataset_name + '/testB'))
-        
+
         self.saver = tf.train.Saver()
         could_load, checkpoint_counter = self.load(self.checkpoint_dir)
+        self.result_dir = os.path.join(self.result_dir, self.model_dir)
+        check_folder(self.result_dir)
 
         if could_load :
             print(" [*] Load SUCCESS")
@@ -291,29 +371,32 @@ class CycleGAN(object):
 
         for sample_file  in test_A_files : # A -> B
             print('Processing A image: ' + sample_file)
-            sample_image = np.asarray(load_test_data(sample_file))
-            image_path = os.path.join(self.result_dir,'{0}'.format(os.path.basename(sample_file)))
+            sample_image = np.asarray(load_test_data(sample_file, size=self.img_size))
+            image_path = os.path.join(self.result_dir, '{0}'.format(os.path.basename(sample_file)))
 
-            fake_img = self.sess.run(self.test_B, feed_dict = {self.domain_A :sample_image})
+            fake_img = self.sess.run(self.test_fake_B, feed_dict={self.test_image: sample_image})
             save_images(fake_img, [1, 1], image_path)
+
             index.write("<td>%s</td>" % os.path.basename(image_path))
             index.write("<td><img src='%s' width='%d' height='%d'></td>" % (sample_file if os.path.isabs(sample_file) else (
-                '..' + os.path.sep + sample_file), self.width, self.height))
+                    '../..' + os.path.sep + sample_file), self.img_size, self.img_size))
             index.write("<td><img src='%s' width='%d' height='%d'></td>" % (image_path if os.path.isabs(image_path) else (
-                '..' + os.path.sep + image_path), self.width, self.height))
+                    '../..' + os.path.sep + image_path), self.img_size, self.img_size))
             index.write("</tr>")
 
         for sample_file  in test_B_files : # B -> A
             print('Processing B image: ' + sample_file)
-            sample_image = np.asarray(load_test_data(sample_file))
-            image_path = os.path.join(self.result_dir,'{0}'.format(os.path.basename(sample_file)))
+            sample_image = np.asarray(load_test_data(sample_file, size=self.img_size))
+            image_path = os.path.join(self.result_dir, '{0}'.format(os.path.basename(sample_file)))
 
-            fake_img = self.sess.run(self.test_A, feed_dict = {self.domain_B : sample_image})
+            fake_img = self.sess.run(self.test_fake_A, feed_dict={self.test_image: sample_image})
             save_images(fake_img, [1, 1], image_path)
+
             index.write("<td>%s</td>" % os.path.basename(image_path))
             index.write("<td><img src='%s' width='%d' height='%d'></td>" % (sample_file if os.path.isabs(sample_file) else (
-                '..' + os.path.sep + sample_file), self.width, self.height))
+                    '../..' + os.path.sep + sample_file), self.img_size, self.img_size))
             index.write("<td><img src='%s' width='%d' height='%d'></td>" % (image_path if os.path.isabs(image_path) else (
-                '..' + os.path.sep + image_path), self.width, self.height))
+                    '../..' + os.path.sep + image_path), self.img_size, self.img_size))
             index.write("</tr>")
+
         index.close()

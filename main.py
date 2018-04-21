@@ -1,27 +1,36 @@
-
 from CycleGAN import CycleGAN
 import argparse
-from ops import *
 from utils import *
+
 """parsing and configuration"""
 def parse_args():
     desc = "Tensorflow implementation of CycleGAN"
     parser = argparse.ArgumentParser(description=desc)
-    parser.add_argument('--phase', type=str, default='train', help='train or test ?')
-    parser.add_argument('--epoch', type=int, default=200, help='The number of epochs to run')
-    parser.add_argument('--batch_size', type=int, default=1, help='The size of batch')
-    parser.add_argument('--do_resnet', type=bool, default=True, help='Doing residual block ? or not ?')
-    parser.add_argument('--dis_layer', type=int, default=3, help='The number of discriminator layer')
-    parser.add_argument('--res_block', type=int, default=6, help='The number of res_block')
-    parser.add_argument('--norm', type=str, default='instance', help='instance or batch')
-    parser.add_argument('--lambdaA', type=float, default=10.0, help='reconstruction_loss')
-    parser.add_argument('--lambdaB', type=float, default=10.0, help='reconstruction_loss')
-    parser.add_argument('--identity', type=float, default=0.5, help='use identity mapping. Setting identity other than 1 has an effect of scaling the weight of the identity mapping loss.'
-                                      'For example, if the weight of the identity loss should be 10 times smaller than the weight of the reconstruction loss, please set optidentity = 0.1')
-    parser.add_argument('--lr', type=float, default=2e-4, help='learning_rate')
-    parser.add_argument('--beta1', type=float, default=0.5, help='Adam')
-    parser.add_argument('--pool_size', type=int, default=50, help='discriminator pool')
-    parser.add_argument('--dataset', type=str, default='cat2dog', help='dataset_name')
+    parser.add_argument('--phase', type=str, default='train', help='train or test')
+    parser.add_argument('--dataset', type=str, default='summer2winter', help='dataset_name')
+    parser.add_argument('--augment_flag', type=bool, default=False, help='Image augmentation use or not')
+
+    parser.add_argument('--epoch', type=int, default=2, help='The number of epochs to run')
+    parser.add_argument('--iteration', type=int, default=100000, help='The number of training iterations')
+    parser.add_argument('--batch_size', type=int, default=1, help='The batch size')
+    parser.add_argument('--print_freq', type=int, default=1000, help='The number of image_print_freq')
+    parser.add_argument('--save_freq', type=int, default=1000, help='The number of ckpt_save_freq')
+
+    parser.add_argument('--gan_type', type=str, default='lsgan', help='GAN loss type [gan / lsgan]')
+
+    parser.add_argument('--lr', type=float, default=0.0002, help='The learning rate')
+    parser.add_argument('--gan_w', type=float, default=1.0, help='weight of adversarial loss')
+    parser.add_argument('--cycle_w', type=float, default=10.0, help='weight of cycle loss')
+    parser.add_argument('--identity_w', type=float, default=5.0, help='weight of identity loss')
+
+    parser.add_argument('--ch', type=int, default=64, help='base channel number per layer')
+    parser.add_argument('--n_res', type=int, default=9, help='The number of residual blocks')
+
+    parser.add_argument('--n_dis', type=int, default=3, help='The number of discriminator layer')
+
+    parser.add_argument('--img_size', type=int, default=256, help='The size of image')
+    parser.add_argument('--img_ch', type=int, default=3, help='The size of image channel')
+
     parser.add_argument('--checkpoint_dir', type=str, default='checkpoint',
                         help='Directory name to save the checkpoints')
     parser.add_argument('--result_dir', type=str, default='results',
