@@ -279,7 +279,7 @@ class CycleGAN(object) :
         lr = self.init_lr
         for epoch in range(start_epoch, self.epoch):
             if epoch >= self.epoch // 2 :
-                lr = self.lr * 0.5
+                lr = self.init_lr * 0.5
 
             for idx in range(start_batch_id, self.iteration):
                 train_feed_dict = {
