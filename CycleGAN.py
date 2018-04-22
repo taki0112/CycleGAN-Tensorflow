@@ -132,7 +132,7 @@ class CycleGAN(object) :
     ##################################################################################
 
     def generate_a2b(self, x_A, reuse=False):
-        x_ab = self.generator(x_A, reuse=reuse, scope='generator_A')
+        x_ab = self.generator(x_A, reuse=reuse, scope='generator_B')
 
         return x_ab
 
